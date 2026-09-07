@@ -1,0 +1,50 @@
+[changelog]
+header = "MOPAGE"
+body = """
+{%- if version %}\# {{ version | trim_start_matches(pat="v") }}
+{%- else %}\# Unreleased
+{%- endif %}
+
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}\- **{{ commit.scope }}**: {% endif %}\- {{ commit.message | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+footer = """
+"""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+commit_parsers = [
+    { message = "^feat", group = "Features" },
+    { message = "^fix", group = "Bug Fixes" },
+    { message = "^perf", group = "Performance" },
+    { message = "^revert", group = "Revert" },
+    { message = "^refactor", group = "Refactoring" },
+    { message = "^docs", group = "Documentation" },
+    { message = "^test", group = "Testing" },
+    { message = "^chore", group = "Miscellaneous" },
+    { message = "^build", group = "Build" },
+    { message = "^ci", group = "CI" },
+    { message = "^style", group = "Style" },
+]
+filter_commits = false
+tag_pattern = "v[0-9]*"
+skip_tags = "v0.0.0"
+ignore_tags = ""
+topo_order = false
+sort_commits = "oldest"
+sort_unconventional = "oldest"
+postprocessors = [
+    { pattern = "\\[ *[0-9]+ *\\]", replace = "" },
+    { pattern = "^- (wip|WIP)", replace = "" },
+]
+
+[github]
+owner = "sweetrpg"
+repo = "authz-client.go"
+token = ""
