@@ -18,8 +18,13 @@ const (
 
 // RequireAnyRole returns gin middleware that verifies the caller's bearer token against
 // auth-api's /authz/check for the given service name, then requires the caller hold at least
-// one of allowedRoles. On success, the verified roles and subject are stashed in the gin
-// context (read via Roles(c) / Subject(c)) for the handler to use.
+// one of allowedRoles. On success, the verified roles, subject, and token are stashed in the
+// gin context (read via Roles(c) / Subject(c) / Token(c)) and the caller's subject is resolved
+// to its canonical users._id (read via Viewer(c)) so role-gated writes stamp a canonical actor.
+//
+// Like the role check itself, the resolution is fail-closed: an unresolvable subject (users-api
+// unreachable, no provisioned profile) aborts with 503 rather than proceeding with an empty
+// actor - a write that cannot be attributed must not happen.
 func RequireAnyRole(client *Client, service string, allowedRoles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := bearerToken(c)
@@ -52,9 +57,20 @@ func RequireAnyRole(client *Client, service string, allowedRoles ...string) gin.
 			return
 		}
 
+		viewer := client.ResolveUserID(c.Request.Context(), token)
+		if viewer == "" {
+			logging.Logger.Error("could not resolve caller to a canonical user id", "sub", result.Sub)
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, apiv.ErrorVO{
+				Error:   "user_resolution_unavailable",
+				Message: "Unable to resolve the calling user",
+			})
+			return
+		}
+
 		c.Set(rolesContextKey, result.Roles)
 		c.Set(subjectContextKey, result.Sub)
 		c.Set(tokenContextKey, token)
+		c.Set(viewerContextKey, viewer)
 		c.Next()
 	}
 }

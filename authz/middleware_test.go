@@ -2,6 +2,7 @@ package authz
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -113,24 +114,39 @@ func TestRequireAnyRole_wrongRole(t *testing.T) {
 	}
 }
 
-func TestRequireAnyRole_allowed(t *testing.T) {
-	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("method = %s, want POST", r.Method)
-		}
-		if r.URL.Path != "/authz/check" {
-			t.Errorf("path = %s, want /authz/check", r.URL.Path)
-		}
+// newRequireAnyRoleStub serves both /authz/check (role verification) and /profile (canonical
+// user resolution) from one server so RequireAnyRole tests can exercise the full middleware.
+func newRequireAnyRoleStub(t *testing.T, checkBody, userID string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"allowed":true,"roles":["editor","admin"],"sub":"auth0|editor-1"}`))
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/authz/check":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(checkBody))
+		case r.Method == http.MethodGet && r.URL.Path == "/profile":
+			if userID == "" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"user_id":%q}`, userID)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
+}
+
+func TestRequireAnyRole_allowed(t *testing.T) {
+	auth := newRequireAnyRoleStub(t, `{"allowed":true,"roles":["editor","admin"],"sub":"auth0|editor-1"}`, "64b2d9f1c4a3e2d1a5b6c7d8")
 	defer auth.Close()
-	client := NewClient(auth.URL, "")
+	client := NewClient(auth.URL, auth.URL)
 
 	var gotRoles []string
 	var gotSub string
 	var gotToken string
+	var gotViewer string
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -140,6 +156,7 @@ func TestRequireAnyRole_allowed(t *testing.T) {
 		gotRoles = Roles(c)
 		gotSub = Subject(c)
 		gotToken = Token(c)
+		gotViewer = Viewer(c)
 		c.String(http.StatusOK, "ok")
 	})
 
@@ -156,21 +173,58 @@ func TestRequireAnyRole_allowed(t *testing.T) {
 	if gotToken != "good-token" {
 		t.Errorf("Token(c) = %q, want good-token", gotToken)
 	}
+	if gotViewer != "64b2d9f1c4a3e2d1a5b6c7d8" {
+		t.Errorf("Viewer(c) = %q, want resolved canonical user id", gotViewer)
+	}
 }
 
 func TestRequireAnyRole_multipleRoles(t *testing.T) {
-	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"allowed":true,"roles":["submitter"],"sub":"auth0|sub"}`))
-	}))
+	auth := newRequireAnyRoleStub(t, `{"allowed":true,"roles":["submitter"],"sub":"auth0|sub"}`, "64b2d9f1c4a3e2d1a5b6c7d8")
 	defer auth.Close()
-	client := NewClient(auth.URL, "")
+	client := NewClient(auth.URL, auth.URL)
 	r := newTestRouter(client, RequireAnyRole(client, "catalog-api", RoleModerator, RoleSubmitter))
 
 	w := performRequest(r, "Bearer good-token")
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want 200 for submitter among [moderator submitter]", w.Code)
+	}
+}
+
+func TestRequireAnyRole_viewerUnresolvable(t *testing.T) {
+	auth := newRequireAnyRoleStub(t, `{"allowed":true,"roles":["editor"],"sub":"auth0|editor-1"}`, "")
+	defer auth.Close()
+	client := NewClient(auth.URL, auth.URL)
+	r := newTestRouter(client, RequireAnyRole(client, "catalog-api", RoleEditor))
+
+	w := performRequest(r, "Bearer good-token")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when subject has no profile", w.Code)
+	}
+	var body apiv.ErrorVO
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Error != "user_resolution_unavailable" {
+		t.Errorf("error = %q, want user_resolution_unavailable", body.Error)
+	}
+}
+
+func TestRequireAnyRole_usersURLUnset(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/authz/check" {
+			t.Errorf("path = %s, want /authz/check", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"allowed":true,"roles":["editor"],"sub":"auth0|editor-1"}`))
+	}))
+	defer auth.Close()
+	client := NewClient(auth.URL, "")
+	r := newTestRouter(client, RequireAnyRole(client, "catalog-api", RoleEditor))
+
+	w := performRequest(r, "Bearer good-token")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when users-api URL is unset", w.Code)
 	}
 }
 

@@ -22,7 +22,10 @@ half (it *is* the `/authz/check` server) and never uses the role middleware.
   as an *anonymous* viewer (`""`) rather than aborting — reads must stay accessible to anonymous
   callers. Used by `game-room-api`, `game-systems-api`, and `catalog-api`'s write-route groups.
 - `RequireAnyRole` is fail-closed: missing/invalid token -> 401, auth-api unavailable -> 503,
-  caller lacking a qualifying role -> 403. Used by role-gated admin routes.
+  caller lacking a qualifying role -> 403. On success it also resolves the caller's subject to
+  its canonical `users._id` (read via `Viewer(c)`) and fails closed with 503
+  `user_resolution_unavailable` when that resolution fails, so role-gated routes never run with
+  an empty actor. Used by role-gated admin routes.
 
 ## Dependencies
 
