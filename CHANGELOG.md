@@ -1,3 +1,10 @@
+
+## 0.1.0 - 2026-09-07
+
+### Added
+- Shared authz client library with identity resolution and role middleware
+
+
 # Changelog
 
 All notable changes to this project are documented in this file.
