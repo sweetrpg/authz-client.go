@@ -1,0 +1,463 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>authz: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/sweetrpg/authz-client.go/authz/client.go (85.1%)</option>
+				
+				<option value="file1">github.com/sweetrpg/authz-client.go/authz/middleware.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">no coverage</span>
+				<span class="cov1">low coverage</span>
+				<span class="cov2">*</span>
+				<span class="cov3">*</span>
+				<span class="cov4">*</span>
+				<span class="cov5">*</span>
+				<span class="cov6">*</span>
+				<span class="cov7">*</span>
+				<span class="cov8">*</span>
+				<span class="cov9">*</span>
+				<span class="cov10">high coverage</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">// Package authz is the shared identity-resolution and authorization client for SweetRPG's Go
+// APIs. It verifies a caller's bearer token against auth-api's POST /authz/check (returning
+// their roles, subject, and allow/deny decision), resolves the subject to the caller's
+// canonical users._id via users-api's GET /profile, and provides gin middleware that stashes
+// the resolved identity in the request context.
+//
+// The package merges what were previously the local authz packages in game-room-api (identity
+// resolution for owner-scoped, anonymous-friendly reads) and catalog-api (fail-closed role
+// gating for admin/moderation routes).
+package authz
+
+import (
+        "bytes"
+        "context"
+        "encoding/json"
+        "fmt"
+        "net/http"
+        "time"
+
+        "github.com/sweetrpg/common.go/logging"
+        "go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+)
+
+// Platform role names, matching auth-api's fixed role model exactly (see
+// openspec/specs/user-authorization/spec.md's "Role model" requirement).
+const (
+        RoleUser      = "user"
+        RoleSubmitter = "submitter"
+        RoleEditor    = "editor"
+        RoleModerator = "moderator"
+        RoleApprover  = "approver"
+        RoleAdmin     = "admin"
+)
+
+// CheckResponse is the union of auth-api's allowed/denied /authz/check response shapes.
+type CheckResponse struct {
+        Allowed bool     `json:"allowed"`
+        Roles   []string `json:"roles"`
+        Sub     string   `json:"sub"`
+        Reason  string   `json:"reason"`
+}
+
+// InvalidTokenError means auth-api rejected the bearer token itself (missing, expired,
+// unverifiable) - distinct from a service-level deny (Allowed: false with a Reason) or a
+// transport/backend failure.
+type InvalidTokenError struct{}
+
+func (InvalidTokenError) Error() string <span class="cov1" title="1">{ return "authz: invalid or missing token" }</span>
+
+// Client calls auth-api's /authz/check endpoint and users-api's /profile endpoint.
+type Client struct {
+        baseURL      string
+        usersBaseURL string
+        http         *http.Client
+}
+
+// NewClient builds a Client against auth-api's base URL and users-api's base URL. authBaseURL
+// drives identity verification (roles + subject); usersBaseURL resolves that subject to the
+// canonical users._id user ID. Either may be empty so the service can still start when the
+// corresponding URL env var isn't configured - a missing URL makes the relevant call fail,
+// which ResolveViewer treats as anonymous and RequireAnyRole surfaces as a 503.
+func NewClient(authBaseURL, usersBaseURL string) *Client <span class="cov10" title="24">{
+        return &amp;Client{
+                baseURL:      authBaseURL,
+                usersBaseURL: usersBaseURL,
+                http: &amp;http.Client{
+                        Timeout:   5 * time.Second,
+                        Transport: otelhttp.NewTransport(http.DefaultTransport),
+                },
+        }
+}</span>
+
+// Check verifies token against auth-api and returns the caller's allowed/roles/subject for the
+// given service name. Returns InvalidTokenError if auth-api rejects the token itself.
+func (c *Client) Check(ctx context.Context, token, service string) (*CheckResponse, error) <span class="cov8" title="14">{
+        body, err := json.Marshal(map[string]string{"service": service})
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("authz: marshal request: %w", err)
+        }</span>
+
+        <span class="cov8" title="14">req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/authz/check", bytes.NewReader(body))
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("authz: build request: %w", err)
+        }</span>
+        <span class="cov8" title="14">req.Header.Set("Content-Type", "application/json")
+        req.Header.Set("Authorization", "Bearer "+token)
+
+        resp, err := c.http.Do(req)
+        if err != nil </span><span class="cov2" title="2">{
+                return nil, fmt.Errorf("authz: request failed: %w", err)
+        }</span>
+        <span class="cov8" title="12">defer func() </span><span class="cov8" title="12">{ _ = resp.Body.Close() }</span>()
+
+        <span class="cov8" title="12">if resp.StatusCode == http.StatusUnauthorized </span><span class="cov4" title="3">{
+                return nil, InvalidTokenError{}
+        }</span>
+        <span class="cov7" title="9">if resp.StatusCode != http.StatusOK </span><span class="cov1" title="1">{
+                return nil, fmt.Errorf("authz: unexpected status %d from auth-api", resp.StatusCode)
+        }</span>
+
+        <span class="cov6" title="8">var out CheckResponse
+        if err := json.NewDecoder(resp.Body).Decode(&amp;out); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("authz: decode response: %w", err)
+        }</span>
+
+        <span class="cov6" title="8">logging.Logger.Debug("authz check", "service", service, "allowed", out.Allowed, "sub", out.Sub)
+        return &amp;out, nil</span>
+}
+
+// profileResponse is the slice of users-api's /profile response the client reads.
+type profileResponse struct {
+        UserID string `json:"user_id"`
+}
+
+// ResolveUserID exchanges a verified bearer token for the caller's canonical users._id user ID
+// by calling users-api's /profile. It returns "" when the token is missing, the user has no
+// provisioned profile (HTTP 404), auth-api rejects the token (HTTP 401), or users-api is
+// unavailable - all of which ResolveViewer treats as an unprovisioned/anonymous viewer.
+func (c *Client) ResolveUserID(ctx context.Context, token string) string <span class="cov7" title="9">{
+        if c.usersBaseURL == "" || token == "" </span><span class="cov2" title="2">{
+                return ""
+        }</span>
+
+        <span class="cov6" title="7">req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.usersBaseURL+"/profile", nil)
+        if err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Debug("users-api resolve: build request", "error", err.Error())
+                return ""
+        }</span>
+        <span class="cov6" title="7">req.Header.Set("Authorization", "Bearer "+token)
+
+        resp, err := c.http.Do(req)
+        if err != nil </span><span class="cov1" title="1">{
+                logging.Logger.Debug("users-api resolve: request failed", "error", err.Error())
+                return ""
+        }</span>
+        <span class="cov6" title="6">defer func() </span><span class="cov6" title="6">{ _ = resp.Body.Close() }</span>()
+
+        <span class="cov6" title="6">if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusUnauthorized </span><span class="cov4" title="3">{
+                return ""
+        }</span>
+        <span class="cov4" title="3">if resp.StatusCode != http.StatusOK </span><span class="cov1" title="1">{
+                logging.Logger.Debug("users-api resolve: unexpected status", "status", resp.StatusCode)
+                return ""
+        }</span>
+
+        <span class="cov2" title="2">var out profileResponse
+        if err := json.NewDecoder(resp.Body).Decode(&amp;out); err != nil </span><span class="cov0" title="0">{
+                logging.Logger.Debug("users-api resolve: decode response", "error", err.Error())
+                return ""
+        }</span>
+        <span class="cov2" title="2">return out.UserID</span>
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package authz
+
+import (
+        "net/http"
+
+        "github.com/gin-gonic/gin"
+        apiv "github.com/sweetrpg/api-core.go/vo"
+        "github.com/sweetrpg/common.go/logging"
+)
+
+// Gin context keys set by RequireAnyRole / ResolveViewer; read via Roles/Subject/Token/Viewer.
+const (
+        rolesContextKey   = "authz.roles"
+        subjectContextKey = "authz.subject"
+        tokenContextKey   = "authz.token"
+        viewerContextKey  = "authz.viewer"
+)
+
+// RequireAnyRole returns gin middleware that verifies the caller's bearer token against
+// auth-api's /authz/check for the given service name, then requires the caller hold at least
+// one of allowedRoles. On success, the verified roles and subject are stashed in the gin
+// context (read via Roles(c) / Subject(c)) for the handler to use.
+func RequireAnyRole(client *Client, service string, allowedRoles ...string) gin.HandlerFunc <span class="cov8" title="7">{
+        return func(c *gin.Context) </span><span class="cov8" title="7">{
+                token := bearerToken(c)
+                if token == "" </span><span class="cov1" title="1">{
+                        unauthorized(c)
+                        return
+                }</span>
+
+                <span class="cov7" title="6">result, err := client.Check(c.Request.Context(), token, service)
+                if err != nil </span><span class="cov3" title="2">{
+                        if _, ok := err.(InvalidTokenError); ok </span><span class="cov1" title="1">{
+                                unauthorized(c)
+                                return
+                        }</span>
+                        <span class="cov1" title="1">logging.Logger.Error("authz check failed", "error", err.Error())
+                        c.AbortWithStatusJSON(http.StatusServiceUnavailable, apiv.ErrorVO{
+                                Error:   "authz_unavailable",
+                                Message: "Unable to verify authorization",
+                        })
+                        return</span>
+                }
+
+                <span class="cov6" title="4">if !result.Allowed </span><span class="cov1" title="1">{
+                        forbidden(c)
+                        return
+                }</span>
+
+                <span class="cov5" title="3">if !hasAnyRole(result.Roles, allowedRoles) </span><span class="cov1" title="1">{
+                        forbidden(c)
+                        return
+                }</span>
+
+                <span class="cov3" title="2">c.Set(rolesContextKey, result.Roles)
+                c.Set(subjectContextKey, result.Sub)
+                c.Set(tokenContextKey, token)
+                c.Next()</span>
+        }
+}
+
+// ResolveViewer returns gin middleware that resolves the caller's identity from a bearer token,
+// when present, and stashes it in the gin context (read via Viewer(c)) for handlers to use in
+// visibility filtering and ownership checks. A missing token, one auth-api rejects, or a subject
+// with no provisioned user profile resolves to an anonymous viewer ("") rather than aborting the
+// request - reads must stay accessible to anonymous callers for anything public.
+//
+// The viewer identity stored in the context is the caller's canonical users._id user ID.
+// Resolving it requires a users-api round trip for authenticated callers; an unresolvable
+// subject yields "" so owner-scoped writes are rejected.
+func ResolveViewer(client *Client, service string) gin.HandlerFunc <span class="cov6" title="4">{
+        return func(c *gin.Context) </span><span class="cov6" title="4">{
+                token := bearerToken(c)
+                if token == "" </span><span class="cov1" title="1">{
+                        c.Set(viewerContextKey, "")
+                        c.Next()
+                        return
+                }</span>
+
+                <span class="cov5" title="3">result, err := client.Check(c.Request.Context(), token, service)
+                if err != nil </span><span class="cov1" title="1">{
+                        logging.Logger.Debug("authz check failed, treating caller as anonymous", "error", err.Error())
+                        c.Set(viewerContextKey, "")
+                        c.Next()
+                        return
+                }</span>
+
+                <span class="cov3" title="2">userID := client.ResolveUserID(c.Request.Context(), token)
+                if userID == "" </span><span class="cov1" title="1">{
+                        logging.Logger.Debug("subject has no provisioned user, treating caller as anonymous", "sub", result.Sub)
+                }</span>
+                <span class="cov3" title="2">c.Set(viewerContextKey, userID)
+                c.Next()</span>
+        }
+}
+
+// Viewer returns the caller's canonical users._id user ID, or "" for an anonymous viewer.
+func Viewer(c *gin.Context) string <span class="cov7" title="5">{
+        if v, ok := c.Get(viewerContextKey); ok </span><span class="cov6" title="4">{
+                if sub, ok := v.(string); ok </span><span class="cov6" title="4">{
+                        return sub
+                }</span>
+        }
+        <span class="cov1" title="1">return ""</span>
+}
+
+// RequireOwner aborts with 403 unless the resolved viewer matches the :user_id path param -
+// every Game Room write endpoint is scoped to the caller's own collection.
+func RequireOwner() gin.HandlerFunc <span class="cov5" title="3">{
+        return func(c *gin.Context) </span><span class="cov5" title="3">{
+                viewer := Viewer(c)
+                if viewer == "" || viewer != c.Param("user_id") </span><span class="cov3" title="2">{
+                        c.AbortWithStatusJSON(http.StatusForbidden, apiv.ErrorVO{
+                                Error:   "forbidden",
+                                Message: "Caller does not own this resource",
+                        })
+                        return
+                }</span>
+                <span class="cov1" title="1">c.Next()</span>
+        }
+}
+
+// Roles returns the verified roles stashed in the gin context by RequireAnyRole.
+func Roles(c *gin.Context) []string <span class="cov3" title="2">{
+        if v, ok := c.Get(rolesContextKey); ok </span><span class="cov1" title="1">{
+                if roles, ok := v.([]string); ok </span><span class="cov1" title="1">{
+                        return roles
+                }</span>
+        }
+        <span class="cov1" title="1">return nil</span>
+}
+
+// Subject returns the verified Auth0 subject stashed in the gin context by RequireAnyRole.
+func Subject(c *gin.Context) string <span class="cov3" title="2">{
+        if v, ok := c.Get(subjectContextKey); ok </span><span class="cov1" title="1">{
+                if sub, ok := v.(string); ok </span><span class="cov1" title="1">{
+                        return sub
+                }</span>
+        }
+        <span class="cov1" title="1">return ""</span>
+}
+
+// Token returns the caller's verified bearer token stashed in the gin context by
+// RequireAnyRole - forwarded onward when this service calls another one on the user's behalf
+// (e.g. assets-web's asset store), so downstream services authorize the same user.
+func Token(c *gin.Context) string <span class="cov3" title="2">{
+        if v, ok := c.Get(tokenContextKey); ok </span><span class="cov1" title="1">{
+                if token, ok := v.(string); ok </span><span class="cov1" title="1">{
+                        return token
+                }</span>
+        }
+        <span class="cov1" title="1">return ""</span>
+}
+
+// HasRole reports whether roles contains want.
+func HasRole(roles []string, want string) bool <span class="cov8" title="7">{
+        for _, r := range roles </span><span class="cov8" title="8">{
+                if r == want </span><span class="cov5" title="3">{
+                        return true
+                }</span>
+        }
+        <span class="cov6" title="4">return false</span>
+}
+
+func hasAnyRole(have []string, want []string) bool <span class="cov5" title="3">{
+        for _, w := range want </span><span class="cov6" title="4">{
+                if HasRole(have, w) </span><span class="cov3" title="2">{
+                        return true
+                }</span>
+        }
+        <span class="cov1" title="1">return false</span>
+}
+
+func bearerToken(c *gin.Context) string <span class="cov10" title="11">{
+        const prefix = "Bearer "
+        auth := c.GetHeader("Authorization")
+        if len(auth) &lt;= len(prefix) || auth[:len(prefix)] != prefix </span><span class="cov3" title="2">{
+                return ""
+        }</span>
+        <span class="cov9" title="9">return auth[len(prefix):]</span>
+}
+
+func unauthorized(c *gin.Context) <span class="cov3" title="2">{
+        c.AbortWithStatusJSON(http.StatusUnauthorized, apiv.ErrorVO{
+                Error:   "invalid_token",
+                Message: "Missing or invalid bearer token",
+        })
+}</span>
+
+func forbidden(c *gin.Context) <span class="cov3" title="2">{
+        c.AbortWithStatusJSON(http.StatusForbidden, apiv.ErrorVO{
+                Error:   "forbidden",
+                Message: "Caller does not have a qualifying role",
+        })
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
