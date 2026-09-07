@@ -1,4 +1,11 @@
 
+## 0.2.0 - 2026-09-07
+
+### Added
+- Resolve viewer fail-closed in RequireAnyRole
+
+
+
 ## 0.1.0 - 2026-09-07
 
 ### Added
