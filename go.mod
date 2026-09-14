@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/sweetrpg/api-core.go v0.1.1
+	github.com/sweetrpg/api-core.go v0.3.1
 	github.com/sweetrpg/common.go v0.0.16
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
 )
