@@ -4,7 +4,7 @@ go 1.26.10
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/sweetrpg/api-core.go v0.1.1
+	github.com/sweetrpg/api-core.go v0.4.0
 	github.com/sweetrpg/common.go v0.0.16
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0
 )
@@ -43,9 +43,9 @@ require (
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	golang.org/x/arch v0.22.0 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/net v0.57.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 )
