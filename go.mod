@@ -1,6 +1,6 @@
 module github.com/sweetrpg/authz-client.go
 
-go 1.26.5
+go 1.26.10
 
 require (
 	github.com/gin-gonic/gin v1.12.0
